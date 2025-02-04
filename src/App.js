@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import StarRating from "./StarRating";
 
 const tempMovieData = [
@@ -65,6 +65,7 @@ export default function App() {
 
   useEffect(
     function () {
+      // const controller = new AbortController();
       async function fetchMovies() {
         try {
           setIsLoading(true);
@@ -73,6 +74,7 @@ export default function App() {
             `http://www.omdbapi.com/?apikey=${apiKey}&s=${
               query.length > 3 ? query : ""
             }`
+            // { signal: controller.signal }
           );
           const data = await res.json();
           console.log(data, res);
@@ -90,10 +92,16 @@ export default function App() {
         }
       }
       fetchMovies();
+      // return () => controller.abort();
     },
     [query]
   );
 
+  function handleDeleteMv(e, id) {
+    console.log(e, id);
+    e.stopPropagation();
+    setWatched((movies) => movies.filter((mv) => mv.mvId !== id));
+  }
   return (
     <>
       <Header query={query} setQuery={setQuery} movies={movies} />
@@ -101,7 +109,11 @@ export default function App() {
         <Box>
           {(isLoading && <Loader />) ||
             (!isLoading && !errmssg && (
-              <MoviesList movies={movies} setSelectedMvId={setSelectedMvId} />
+              <MoviesList
+                movies={movies}
+                selectedMvId={selectedMvId}
+                setSelectedMvId={setSelectedMvId}
+              />
             )) ||
             (errmssg && <ErrorComp message={errmssg} />)}
         </Box>
@@ -111,11 +123,18 @@ export default function App() {
             <MovieDetails
               mvId={selectedMvId}
               setSelectedMvId={setSelectedMvId}
+              setWatched={setWatched}
+              watched={watched}
+              selectedMvId={selectedMvId}
             />
           ) : (
             <>
               <Summary watched={watched} />
-              <WatchedMoviesList watched={watched} />
+              <WatchedMoviesList
+                watched={watched}
+                setSelectedMvId={setSelectedMvId}
+                handleDeleteMv={handleDeleteMv}
+              />
             </>
           )}
         </Box>
@@ -161,11 +180,16 @@ function Box({ children }) {
   );
 }
 
-function MoviesList({ movies, setSelectedMvId }) {
+function MoviesList({ movies, setSelectedMvId, selectedMvId }) {
   return (
     <ul className="list">
       {movies?.map((movie) => (
-        <li key={movie.imdbID} onClick={() => setSelectedMvId(movie.imdbID)}>
+        <li
+          key={movie.imdbID}
+          onClick={() =>
+            setSelectedMvId(selectedMvId === movie.imdbID ? null : movie.imdbID)
+          }
+        >
           <img src={movie.Poster} alt={`${movie.Title} poster`} />
           <h3>{movie.Title}</h3>
           <div>
@@ -181,9 +205,15 @@ function MoviesList({ movies, setSelectedMvId }) {
 }
 
 function Summary({ watched }) {
-  const avgImdbRating = average(watched.map((movie) => movie.imdbRating));
-  const avgUserRating = average(watched.map((movie) => movie.userRating));
-  const avgRuntime = average(watched.map((movie) => movie.runtime));
+  const avgImdbRating = average(
+    watched.map((movie) => movie.imdbRating)
+  ).toFixed(2);
+  const avgUserRating = average(
+    watched.map((movie) => movie.userRating)
+  ).toFixed(2);
+  const avgRuntime = average(
+    watched.map((movie) => (movie.runtime ? movie.runtime : 0))
+  ).toFixed(2);
   return (
     <div className="summary">
       <h2>Movies you watched</h2>
@@ -209,13 +239,13 @@ function Summary({ watched }) {
   );
 }
 
-function WatchedMoviesList({ watched }) {
+function WatchedMoviesList({ watched, setSelectedMvId, handleDeleteMv }) {
   return (
     <ul className="list">
       {watched.map((movie) => (
-        <li key={movie.imdbID}>
-          <img src={movie.Poster} alt={`${movie.Title} poster`} />
-          <h3>{movie.Title}</h3>
+        <li key={movie.mvId} onClick={() => setSelectedMvId(movie.mvId)}>
+          <img src={movie.poster} alt={`${movie.title} poster`} />
+          <h3>{movie.title}</h3>
           <div>
             <p>
               <span>⭐️</span>
@@ -229,6 +259,12 @@ function WatchedMoviesList({ watched }) {
               <span>⏳</span>
               <span>{movie.runtime} min</span>
             </p>
+            <button
+              className="btn-delete"
+              onClick={(e) => handleDeleteMv(e, movie.mvId)}
+            >
+              X
+            </button>
           </div>
         </li>
       ))}
@@ -243,9 +279,17 @@ function ErrorComp({ message }) {
   return <p className="error">{message}</p>;
 }
 
-function MovieDetails({ mvId, setSelectedMvId }) {
+function MovieDetails({
+  mvId,
+  setSelectedMvId,
+  setWatched,
+  watched,
+  selectedMvId,
+}) {
   const [isLoading, setIsLoading] = useState(false);
   const [currMovie, setCurrMovie] = useState({});
+  const [userRating, setUserRating] = useState(0);
+  const [avgRating, setAvgRating] = useState(0);
   useEffect(
     function () {
       async function fetchMovie() {
@@ -278,6 +322,69 @@ function MovieDetails({ mvId, setSelectedMvId }) {
     Released: released,
     Runtime: runtime,
   } = currMovie;
+
+  // useEffect(
+  //   function () {
+  //     setAvgRating(imdbRating);
+  //     setAvgRating((avg) => avg * 2);
+  //   },
+  //   [setAvgRating, imdbRating]
+  // );
+
+  const isRatedAlready = watched.find(
+    (mv) => mv.mvId === selectedMvId
+  )?.userRating;
+
+  const handleAdd = useCallback(() => {
+    if (!userRating) return;
+    const movie = {
+      poster,
+      title,
+      imdbRating: Number(imdbRating),
+      mvId,
+      runtime: Number(runtime.split(" ")[0]),
+      userRating,
+    };
+    setWatched((movies) => [...movies, movie]);
+    setSelectedMvId(null);
+  });
+  useEffect(
+    function () {
+      localStorage.setItem("watched", JSON.stringify(watched));
+    },
+    [watched]
+  );
+
+  useEffect(
+    function () {
+      document.addEventListener("keydown", handleKeyPress);
+      function handleKeyPress(e) {
+        if (e.key === "Escape") {
+          setSelectedMvId(null);
+        }
+        if (e.key === "Enter") {
+          console.log(e.key);
+          handleAdd();
+        }
+      }
+      return () => document.removeEventListener("keydown", handleKeyPress);
+    },
+    [setSelectedMvId, handleAdd]
+  );
+
+  function handleRating(rating) {
+    setUserRating(rating);
+  }
+
+  useEffect(
+    function () {
+      document.title = "Use-Popcorn | " + title;
+
+      return () => (document.title = "Use-Popcorn");
+    },
+    [title]
+  );
+
   return (
     <div className="details">
       {isLoading ? (
@@ -304,14 +411,24 @@ function MovieDetails({ mvId, setSelectedMvId }) {
           {/* <p>{avgRating}</p> */}
 
           <section>
-            <div className="rating">
-              <StarRating
-                maxRating={10}
-                color="#fcc419"
-                size={24}
-                defaultRating={0}
-              />
-            </div>
+            {isRatedAlready ? (
+              <p className="rating">You Rated this Movie {isRatedAlready} ⭐</p>
+            ) : (
+              <>
+                <div className="rating">
+                  <StarRating
+                    maxRating={10}
+                    color="#fcc419"
+                    size={24}
+                    defaultRating={0}
+                    onSetRating={handleRating}
+                  />
+                </div>
+                <button className="btn-add" onClick={handleAdd}>
+                  Add to list
+                </button>
+              </>
+            )}
             <p>
               <em>{plot}</em>
             </p>
